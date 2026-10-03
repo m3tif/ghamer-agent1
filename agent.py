@@ -3,7 +3,7 @@ import chromadb
 from google import genai
 from google.genai import types
 
-# 1. جلب API Key من البيئة أو من Streamlit Secrets
+# 1. جلب API Key
 api_key = os.getenv("GEMINI_API_KEY")
 
 def get_client():
@@ -33,7 +33,7 @@ def get_context(user_query: str) -> str:
     return ""
 
 def get_agent_response(user_message: str) -> str:
-    """دالة لمعالجة سؤال العميل وإرجاع الرد مباشرة"""
+    """دالة لمعالجة سؤال العميل وإرجاع الرد مباشرة مع محاولة موديل احتياطي"""
     retrieved_docs = get_context(user_message)
 
     system_instruction = f"""
@@ -49,16 +49,23 @@ def get_agent_response(user_message: str) -> str:
 3. التذكر والسياق: راعِ سياق الحديث والردود السابقة مع العميل.
 """
 
-    try:
-        # استخدام الموديل المطلوب gemini-3.8-flash
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=user_message,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.3
+    # قائمة الموديلات المتاحة بالترتيب (في حال كان الأول عليه ضغط يذهب للثاني)
+    models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
+
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=user_message,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.3
+                )
             )
-        )
-        return response.text
-    except Exception as e:
-        return f"حدث خطأ أثناء معالجة طلبك: {e}"
+            return response.text
+        except Exception as e:
+            # إذا كان الخطأ بسبب الضغط (503)، جرب الموديل التالي
+            print(f"Failed with model {model_name}: {e}")
+            continue
+
+    return "السيرفرات تشهد ضغطاً حالياً، يرجى إعادة محاولة إرسال الرسالة بعد لحظات."
