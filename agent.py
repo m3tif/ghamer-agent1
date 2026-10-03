@@ -31,7 +31,7 @@ def read_services_file() -> str:
 SERVICES_CONTEXT = read_services_file()
 
 def get_agent_response(user_message: str) -> str:
-    """إرسال الطلب وحجم استجابة سريع جداً"""
+    """إرسال الطلب والحصول على رد سريع"""
     try:
         client = get_client()
     except Exception as e:
@@ -50,28 +50,23 @@ def get_agent_response(user_message: str) -> str:
 3. عدم توفر المعلومة: فقط إذا كان السؤال عن شيء غير موجود تماماً في البيانات، اعتذر برفق واطلب التواصل عبر الرقم 966115105887+ أو حساب الانستجرام ghameragency@.
 """
 
-    # استخدام gemini-2.5-flash كنموذج رئيسي وسريع
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=user_message,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.3
-            )
-        )
-        return response.text
-    except Exception as e:
-        # تجربة gemini-1.5-flash كنموذج احتياطي
+    # قائمة النماذج بالترتيب: الأساسي ثم الاحتياطي
+    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    last_error = None
+
+    for model_name in models_to_try:
         try:
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model=model_name,
                 contents=user_message,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
-                    temperature=0.3
-                )
+                    temperature=0.3,
+                ),
             )
             return response.text
-        except Exception as err:
-            return f"حدث خطأ أثناء الاتصال بالنموذج: {err}"
+        except Exception as e:
+            last_error = e
+            continue
+
+    return f"حدث خطأ أثناء الاتصال بالنموذج: {last_error}"
