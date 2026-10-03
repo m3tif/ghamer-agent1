@@ -2,20 +2,25 @@ import os
 from google import genai
 from google.genai import types
 
+
+def get_secret(name: str):
+    """جلب قيمة من متغيرات البيئة أو من Streamlit Secrets"""
+    value = os.getenv(name)
+    if value:
+        return value
+    try:
+        import streamlit as st
+        return st.secrets.get(name)
+    except Exception:
+        return None
+
+
 def get_client():
-    # محاولة جلب المفتاح من متغيرات البيئة أو Streamlit Secrets
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        try:
-            import streamlit as st
-            api_key = st.secrets["GEMINI_API_KEY"]
-        except Exception:
-            pass
-            
+    api_key = get_secret("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("⚠️ لم يتم العثور على GEMINI_API_KEY!")
-        
     return genai.Client(api_key=api_key)
+
 
 # قراءة الخدمات
 def read_services_file() -> str:
@@ -28,7 +33,9 @@ def read_services_file() -> str:
             pass
     return ""
 
+
 SERVICES_CONTEXT = read_services_file()
+
 
 def get_agent_response(user_message: str) -> str:
     """إرسال الطلب والحصول على رد سريع"""
@@ -50,10 +57,19 @@ def get_agent_response(user_message: str) -> str:
 3. عدم توفر المعلومة: فقط إذا كان السؤال عن شيء غير موجود تماماً في البيانات، اعتذر برفق واطلب التواصل عبر الرقم 966115105887+ أو حساب الانستجرام ghameragency@.
 """
 
-    # قائمة النماذج بالترتيب: الأساسي ثم الاحتياطي
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
-    last_error = None
+    # اسم النموذج ممكن يتغير من Secrets (MODEL_NAME) بدون تعديل الكود
+    custom_model = get_secret("MODEL_NAME")
 
+    models_to_try = [
+        m for m in [
+            custom_model,
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
+        ] if m
+    ]
+
+    errors = []
     for model_name in models_to_try:
         try:
             response = client.models.generate_content(
@@ -66,7 +82,7 @@ def get_agent_response(user_message: str) -> str:
             )
             return response.text
         except Exception as e:
-            last_error = e
+            errors.append(f"{model_name}: {e}")
             continue
 
-    return f"حدث خطأ أثناء الاتصال بالنموذج: {last_error}"
+    return "حدث خطأ أثناء الاتصال بالنموذج:\n" + "\n".join(errors)
