@@ -1,58 +1,42 @@
 import os
 import chromadb
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from google import genai
 from google.genai import types
 
-# 1. تحميل الإعدادات
-load_dotenv()
+# 1. جلب API Key من البيئة أو من Streamlit Secrets
 api_key = os.getenv("GEMINI_API_KEY")
 
-if not api_key:
-    raise ValueError("⚠️ لم يتم العثور على GEMINI_API_KEY في ملف .env!")
+def get_client():
+    if not api_key:
+        try:
+            import streamlit as st
+            return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        except Exception:
+            raise ValueError("⚠️ لم يتم العثور على GEMINI_API_KEY!")
+    return genai.Client(api_key=api_key)
 
-client = genai.Client(api_key=api_key)
+client = get_client()
 
-# 2. الاتصال بقاعدة البيانات المحلية
-chroma_client = chromadb.PersistentClient(path="./company_db")
-collection = chroma_client.get_collection(name="services")
-
-# 3. إعداد تطبيق FastAPI
-app = FastAPI(title="Ghamer AI Agent API")
-
-# تخزين جلسات الشات في الذاكرة (مقتطع حسب العميل)
-sessions = {}
-
-class ChatRequest(BaseModel):
-    session_id: str
-    message: str
+# 2. الاتصال بقاعدة البيانات المحفوظة (استخدام get_or_create لمنع NotFoundError)
+db_path = os.path.join(os.path.dirname(__file__), "company_db")
+chroma_client = chromadb.PersistentClient(path=db_path)
+collection = chroma_client.get_or_create_collection(name="services")
 
 def get_context(user_query: str) -> str:
-    """استرجاع المعلومات من قاعدة البيانات"""
-    results = collection.query(
-        query_texts=[user_query],
-        n_results=3
-    )
-    if results and results["documents"]:
-        return "\n".join(results["documents"][0])
+    """استرجاع المعلومات المتعلقة من قاعدة البيانات"""
+    try:
+        results = collection.query(query_texts=[user_query], n_results=3)
+        if results and results.get("documents") and results["documents"][0]:
+            return "\n".join(results["documents"][0])
+    except Exception as e:
+        print(f"Error querying ChromaDB: {e}")
     return ""
 
-@app.post("/chat")
-def chat_endpoint(request: ChatRequest):
-    session_id = request.session_id
-    user_message = request.message.strip()
-
-    if not user_message:
-        raise HTTPException(status_code=400, detail="الرسالة فارغة")
-
-    # جلب context الخدمات المتعلق بالسؤال
+def get_agent_response(user_message: str) -> str:
+    """دالة لمعالجة سؤال العميل وإرجاع الرد مباشرة"""
     retrieved_docs = get_context(user_message)
 
-    # إنشاء جلسة شات جديدة لو العميل أول مرة يراسلنا
-    if session_id not in sessions:
-        system_instruction = f"""
+    system_instruction = f"""
 أنت مساعد خدمة العملاء الذكي لوكالة "غامر للإعلان والتسويق" (Ghamer Agency).
 وظيفتك الرد على استفسارات العملاء بأسلوب مهني، ودود، ومختصر باللغة العربية.
 
@@ -60,33 +44,20 @@ def chat_endpoint(request: ChatRequest):
 {retrieved_docs}
 
 قواعد التعامل مع الأسئلة واللغة:
-1. التكيف مع اللهجات: افهم سؤال العميل بأي لهجة عربية (سعودية، مصرية، شامية... إلخ) وأجب عليه بلغة عربية مبسطة وودودة.
+1. التكيف مع اللهجات: افهم سؤال العميل بأي لهجة عربية وأجب عليه بلغة عربية مبسطة وودودة.
 2. عدم توفر المعلومة: إذا كانت المعلومة غير موجودة في البيانات أعلاه، لا تخترع إجابة، بل اعتذر برفق واطلب منه التواصل عبر الرقم 966115105887+ أو حساب الانستجرام ghameragency@.
 3. التذكر والسياق: راعِ سياق الحديث والردود السابقة مع العميل.
 """
-        sessions[session_id] = client.chats.create(
-            model="gemini-3.8-flash",
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=user_message,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.3
             )
         )
-
-    chat = sessions[session_id]
-
-    try:
-        # إرسال الرسالة مع تذكر الـ History تلقائياً
-        response = chat.send_message(user_message)
-        return {
-            "status": "success",
-            "session_id": session_id,
-            "response": response.text
-        }
+        return response.text
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# تشغيل الـ CLI المباشر للتجربة في الـ Terminal
-if __name__ == "__main__":
-    import uvicorn
-    print("🚀 جاري تشغيل الـ Agent سيرفر على http://127.0.0.1:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+        return f"حدث خطأ أثناء معالجة طلبك: {e}"
