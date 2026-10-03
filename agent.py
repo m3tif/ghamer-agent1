@@ -17,48 +17,28 @@ def get_client():
 
 client = get_client()
 
-# 2. قراءة ملف services.txt المباشر كدعم أساسي
+# 2. قراءة ملف الخدمات مباشرة لخفة وسرعة الاستجابة
 def read_services_file() -> str:
     file_path = os.path.join(os.path.dirname(__file__), "services.txt")
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return f.read()
-        except Exception as e:
-            print(f"Error reading services.txt: {e}")
+        except Exception:
+            pass
     return ""
 
-# 3. الاتصال بقاعدة البيانات المحفوظة
-db_path = os.path.join(os.path.dirname(__file__), "company_db")
-chroma_client = chromadb.PersistentClient(path=db_path)
-collection = chroma_client.get_or_create_collection(name="services")
-
-def get_context(user_query: str) -> str:
-    """استرجاع المعلومات من ChromaDB أو من ملف services.txt مباشرة"""
-    context = ""
-    try:
-        results = collection.query(query_texts=[user_query], n_results=3)
-        if results and results.get("documents") and results["documents"][0]:
-            context = "\n".join(results["documents"][0])
-    except Exception as e:
-        print(f"Error querying ChromaDB: {e}")
-
-    # إذا كانت قاعدة البيانات فارغة، استخدم محتوى ملف services.txt فوراً
-    if not context.strip():
-        context = read_services_file()
-
-    return context
+# قراءة الخدمات مرة واحدة فقط عند بدء السيرفر لزيادة السرعة
+SERVICES_CONTEXT = read_services_file()
 
 def get_agent_response(user_message: str) -> str:
-    """دالة لمعالجة سؤال العميل وإرجاع الرد مباشرة"""
-    retrieved_docs = get_context(user_message)
-
+    """دالة خفيفة وسريعة جداً لمعالجة الردود"""
     system_instruction = f"""
 أنت مساعد خدمة العملاء الذكي لوكالة "غامر للإعلان والتسويق" (Ghamer Agency).
 وظيفتك الرد على استفسارات العملاء وإجابتهم بالتفصيل عن الخدمات المتاحة بناءً على المعلومات التالية فقط.
 
 المعلومات المتاحة لديك عن الخدمات والشركة:
-{retrieved_docs}
+{SERVICES_CONTEXT}
 
 قواعد التعامل مع الأسئلة واللغة:
 1. إظهار الخدمات: عند سؤال العميل عن الخدمات المتاحة، اذكر له جميع الخدمات والحلول الموجودة في البيانات أعلاه بوضوح وبأسلوب جذاب ومختصر.
@@ -66,7 +46,8 @@ def get_agent_response(user_message: str) -> str:
 3. عدم توفر المعلومة: فقط إذا كان السؤال عن شيء غير موجود تماماً في البيانات، اعتذر برفق واطلب التواصل عبر الرقم 966115105887+ أو حساب الانستجرام ghameragency@.
 """
 
-    models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
+    # البداية بالموديل الأسرع والأخف فوراً
+    models_to_try = ["gemini-1.5-flash", "gemini-2.5-flash"]
 
     for model_name in models_to_try:
         try:
@@ -80,7 +61,7 @@ def get_agent_response(user_message: str) -> str:
             )
             return response.text
         except Exception as e:
-            print(f"Failed with model {model_name}: {e}")
+            print(f"Error with {model_name}: {e}")
             continue
 
-    return "السيرفرات تشهد ضغطاً حالياً، يرجى إعادة محاولة إرسال الرسالة بعد لحظات."
+    return "عذراً، حدث تأخير في الاستجابة. يرجى إعادة محاولة إرسال الرسالة."
