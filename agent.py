@@ -17,7 +17,7 @@ def get_client():
 
 client = get_client()
 
-# 2. الاتصال بقاعدة البيانات المحفوظة (استخدام get_or_create لمنع NotFoundError)
+# 2. الاتصال بقاعدة البيانات المحفوظة
 db_path = os.path.join(os.path.dirname(__file__), "company_db")
 chroma_client = chromadb.PersistentClient(path=db_path)
 collection = chroma_client.get_or_create_collection(name="services")
@@ -50,8 +50,9 @@ def get_agent_response(user_message: str) -> str:
 """
 
     try:
+        # استخدام الموديل المطلوب gemini-3.8-flash
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=user_message,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
