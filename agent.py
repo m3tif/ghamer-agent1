@@ -17,39 +17,55 @@ def get_client():
 
 client = get_client()
 
-# 2. الاتصال بقاعدة البيانات المحفوظة
+# 2. قراءة ملف services.txt المباشر كدعم أساسي
+def read_services_file() -> str:
+    file_path = os.path.join(os.path.dirname(__file__), "services.txt")
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            print(f"Error reading services.txt: {e}")
+    return ""
+
+# 3. الاتصال بقاعدة البيانات المحفوظة
 db_path = os.path.join(os.path.dirname(__file__), "company_db")
 chroma_client = chromadb.PersistentClient(path=db_path)
 collection = chroma_client.get_or_create_collection(name="services")
 
 def get_context(user_query: str) -> str:
-    """استرجاع المعلومات المتعلقة من قاعدة البيانات"""
+    """استرجاع المعلومات من ChromaDB أو من ملف services.txt مباشرة"""
+    context = ""
     try:
         results = collection.query(query_texts=[user_query], n_results=3)
         if results and results.get("documents") and results["documents"][0]:
-            return "\n".join(results["documents"][0])
+            context = "\n".join(results["documents"][0])
     except Exception as e:
         print(f"Error querying ChromaDB: {e}")
-    return ""
+
+    # إذا كانت قاعدة البيانات فارغة، استخدم محتوى ملف services.txt فوراً
+    if not context.strip():
+        context = read_services_file()
+
+    return context
 
 def get_agent_response(user_message: str) -> str:
-    """دالة لمعالجة سؤال العميل وإرجاع الرد مباشرة مع محاولة موديل احتياطي"""
+    """دالة لمعالجة سؤال العميل وإرجاع الرد مباشرة"""
     retrieved_docs = get_context(user_message)
 
     system_instruction = f"""
 أنت مساعد خدمة العملاء الذكي لوكالة "غامر للإعلان والتسويق" (Ghamer Agency).
-وظيفتك الرد على استفسارات العملاء بأسلوب مهني، ودود، ومختصر باللغة العربية.
+وظيفتك الرد على استفسارات العملاء وإجابتهم بالتفصيل عن الخدمات المتاحة بناءً على المعلومات التالية فقط.
 
 المعلومات المتاحة لديك عن الخدمات والشركة:
 {retrieved_docs}
 
 قواعد التعامل مع الأسئلة واللغة:
-1. التكيف مع اللهجات: افهم سؤال العميل بأي لهجة عربية وأجب عليه بلغة عربية مبسطة وودودة.
-2. عدم توفر المعلومة: إذا كانت المعلومة غير موجودة في البيانات أعلاه، لا تخترع إجابة، بل اعتذر برفق واطلب منه التواصل عبر الرقم 966115105887+ أو حساب الانستجرام ghameragency@.
-3. التذكر والسياق: راعِ سياق الحديث والردود السابقة مع العميل.
+1. إظهار الخدمات: عند سؤال العميل عن الخدمات المتاحة، اذكر له جميع الخدمات والحلول الموجودة في البيانات أعلاه بوضوح وبأسلوب جذاب ومختصر.
+2. التكيف مع اللهجات: افهم سؤال العميل بأي لهجة عربية وأجب عليه بلغة عربية مبسطة وودودة.
+3. عدم توفر المعلومة: فقط إذا كان السؤال عن شيء غير موجود تماماً في البيانات، اعتذر برفق واطلب التواصل عبر الرقم 966115105887+ أو حساب الانستجرام ghameragency@.
 """
 
-    # قائمة الموديلات المتاحة بالترتيب (في حال كان الأول عليه ضغط يذهب للثاني)
     models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
 
     for model_name in models_to_try:
@@ -64,7 +80,6 @@ def get_agent_response(user_message: str) -> str:
             )
             return response.text
         except Exception as e:
-            # إذا كان الخطأ بسبب الضغط (503)، جرب الموديل التالي
             print(f"Failed with model {model_name}: {e}")
             continue
 
