@@ -1,23 +1,23 @@
 import os
-import chromadb
 from google import genai
 from google.genai import types
 
-# 1. جلب API Key
-api_key = os.getenv("GEMINI_API_KEY")
-
 def get_client():
+    # محاولة جلب المفتاح من متغيرات البيئة أو Streamlit Secrets
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         try:
             import streamlit as st
-            return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+            api_key = st.secrets["GEMINI_API_KEY"]
         except Exception:
-            raise ValueError("⚠️ لم يتم العثور على GEMINI_API_KEY!")
+            pass
+            
+    if not api_key:
+        raise ValueError("⚠️ لم يتم العثور على GEMINI_API_KEY!")
+        
     return genai.Client(api_key=api_key)
 
-client = get_client()
-
-# 2. قراءة ملف الخدمات مباشرة لخفة وسرعة الاستجابة
+# قراءة الخدمات
 def read_services_file() -> str:
     file_path = os.path.join(os.path.dirname(__file__), "services.txt")
     if os.path.exists(file_path):
@@ -28,11 +28,15 @@ def read_services_file() -> str:
             pass
     return ""
 
-# قراءة الخدمات مرة واحدة فقط عند بدء السيرفر لزيادة السرعة
 SERVICES_CONTEXT = read_services_file()
 
 def get_agent_response(user_message: str) -> str:
-    """دالة خفيفة وسريعة جداً لمعالجة الردود"""
+    """إرسال الطلب وحجم استجابة سريع جداً"""
+    try:
+        client = get_client()
+    except Exception as e:
+        return f"خطأ في الاتصال بالمفتاح (API Key): {e}"
+
     system_instruction = f"""
 أنت مساعد خدمة العملاء الذكي لوكالة "غامر للإعلان والتسويق" (Ghamer Agency).
 وظيفتك الرد على استفسارات العملاء وإجابتهم بالتفصيل عن الخدمات المتاحة بناءً على المعلومات التالية فقط.
@@ -46,13 +50,22 @@ def get_agent_response(user_message: str) -> str:
 3. عدم توفر المعلومة: فقط إذا كان السؤال عن شيء غير موجود تماماً في البيانات، اعتذر برفق واطلب التواصل عبر الرقم 966115105887+ أو حساب الانستجرام ghameragency@.
 """
 
-    # البداية بالموديل الأسرع والأخف فوراً
-    models_to_try = ["gemini-1.5-flash", "gemini-2.5-flash"]
-
-    for model_name in models_to_try:
+    # استخدام gemini-2.5-flash كنموذج رئيسي وسريع
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.3
+            )
+        )
+        return response.text
+    except Exception as e:
+        # تجربة gemini-1.5-flash كنموذج احتياطي
         try:
             response = client.models.generate_content(
-                model=model_name,
+                model="gemini-1.5-flash",
                 contents=user_message,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -60,8 +73,5 @@ def get_agent_response(user_message: str) -> str:
                 )
             )
             return response.text
-        except Exception as e:
-            print(f"Error with {model_name}: {e}")
-            continue
-
-    return "عذراً، حدث تأخير في الاستجابة. يرجى إعادة محاولة إرسال الرسالة."
+        except Exception as err:
+            return f"حدث خطأ أثناء الاتصال بالنموذج: {err}"
